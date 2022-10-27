@@ -13,19 +13,22 @@ from starencoder.utils import get_train_valid_loader, train_epoch_den, test_epoc
 
 def train_NN(args):
 
-    indices_train = None
-    indices_valid = None
-    if args.only_bad_contam:
-        with h5py.File(args.data_path, 'r') as f:
-            print(len(f['frac_solar']))
-            cond_frac_solar = (f['frac_solar'][:] > 0.45) & (f['frac_solar'][:] < 0.48)
-            cond_small_vals = [np.all(f_ < 1) for f_ in f['spectra']]
+    with h5py.File(args.data_path, 'r') as f:
+        cond_frac_solar = (f['frac_solar'][:] > 0.45) & (f['frac_solar'][:] < 0.48)
+        cond_small_vals = [np.all(f_ < 1) for f_ in f['spectra']]
+
+        if args.only_bad_contam:
             indices_train = np.argwhere(cond_frac_solar & cond_small_vals).squeeze()
+        else:
+            indices_train = np.argwhere(cond_small_vals).squeeze()
         if args.validation_path:
             with h5py.File(args.validation_path, 'r') as f:
                 cond_frac_solar = (f['frac_solar'][:] > 0.45) & (f['frac_solar'][:] < 0.48)
                 cond_small_vals = [np.all(f_ < 1) for f_ in f['spectra']]
-                indices_valid = np.argwhere(cond_frac_solar & cond_small_vals).squeeze()
+                if args.only_bad_contam:
+                    indices_valid = np.argwhere(cond_frac_solar & cond_small_vals).squeeze()
+                else:
+                    indices_valid = np.argwhere(cond_small_vals).squeeze()
 
     ### Define the loss function
     if args.loss_fn.lower() == 'mse':
