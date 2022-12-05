@@ -122,7 +122,7 @@ def make_dataset(args):
     o = []
     s = []
     ti = []
-    print('Collecting spectra...')
+    print(f'Collecting spectra for the {args.dset_type} set...')
     for i in range(args.total_num):
 
         if i % 100 == 0:
@@ -218,21 +218,19 @@ def make_dataset(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data_path', type=str, required=True,
-                        help='Path of training file')
-    parser.add_argument('--total_num', type=int, required=True,
-                        help='Size of training set')
     parser.add_argument('--save_path', type=str, required=True,
                         help='Folder to save trained model in (if None, folder name created based on date)')
+    parser.add_argument('--total_num', type=int, required=True,
+                        help='Size of training set')
     parser.add_argument('--wave_grid_solar', type=str, default='/arc/home/Merileo/data/wave_grids/UVES_4835-5395_solar.npy',
                         help='Number of spectra used in a single batch')
     parser.add_argument('--wave_grid_weave', type=str, default='/arc/home/Merileo/data/wave_grids/weave_hr_wavegrid_arms.npy',
                         help='Number of spectra used in a single batch')
     parser.add_argument('--solar_spectra', type=str, default=os.path.join(spec_dir, 'UVES_solar_spectra.npy'),
                         help='Number of spectra used in a single batch')
-    parser.add_argument('--uves_spectra', type=str, default=os.path.join(spec_dir, 'UVES_GE_MW_4835-5395_nonorm.h5'),
+    parser.add_argument('--uves_spectra', type=str, default=os.path.join(spec_dir, 'UVES_GE_MW_4835-5395_nonorm_abundances.h5'),
                         help='Number of spectra used in a single batch')
-    parser.add_argument('--type_dset', type=str, default='train',
+    parser.add_argument('--dset_type', type=str, default='train',
                         help='Number of spectra used in a single batch')
     args = parser.parse_args()
 
