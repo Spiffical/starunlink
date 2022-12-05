@@ -14,6 +14,11 @@ home = os.getenv('HOME')
 data_dir = os.path.join(home, 'data')
 spec_dir = os.path.join(data_dir, 'spectra')
 
+BATCH_SIZE = 16
+DATA_DICT = {"spectra": [], "spectra+solar": [], "frac_solar": [], "snr": [], "O": [],
+             "Mg": [], "Ca": [], "S": [], "Ti": [], "vmicro": [], "vrad": [], "feh": [],
+             "teff": [], "logg": []}
+
 
 def add_radial_velocity(wav, rv, flux=None):
     """
@@ -42,11 +47,11 @@ def augment_spectrum(flux, wav, intermediate_wav, final_wav, to_res=20000):
 
     # Degrade resolution
     flux = resolution_convolution(wavelength=intermediate_wav,
-                                    extended_wav=wav,
-                                    extended_flux=flux,
-                                    R=to_res,
-                                    normalize=True,
-                                    num_procs=1)
+                                  extended_wav=wav,
+                                  extended_flux=flux,
+                                  R=to_res,
+                                  normalize=True,
+                                  num_procs=1)
 
     # Rebin to final wave grid
     flux = rebin(final_wav, intermediate_wav, flux)
@@ -79,6 +84,8 @@ def augment_spectra_parallel(spectra, wav, intermediate_wav, final_wav, instrume
 
 def make_dataset(args):
 
+    global BATCH_SIZE, DATA_DICT
+
     wave_grid_solar = np.load(args.wave_grid_solar)
     wave_grid_weave = np.load(args.wave_grid_weave)
     shortened_wave_grid = wave_grid_solar[400:-400]
@@ -94,39 +101,25 @@ def make_dataset(args):
         y_uves = np.column_stack([f['teff'][:], f['logg'][:], f['fe_h'][:], f['v_rad'][:], f['vmicro'][:]])
         abundances_uves = np.column_stack([f['Ca'][:], f['Mg'][:], f['O'][:], f['S'][:], f['Ti'][:]])
         snr_uves = f['SNR'][:]
-        ges_type = f['ges_type'][:]
-        objects = f['object'][:]
-        wave_grid = f['wave_grid'][:]
+        # ges_type = f['ges_type'][:]
+        # objects = f['object'][:]
+        # wave_grid = f['wave_grid'][:]
     non_nan_indices = np.array([not any(np.isnan(y)) for y in y_uves])
     spectra = spectra[non_nan_indices]
     y_uves = y_uves[non_nan_indices]
     abundances_uves = abundances_uves[non_nan_indices]
     snr_uves = snr_uves[non_nan_indices]
-    ges_type = ges_type[non_nan_indices]
-    objects = objects[non_nan_indices]
+    # ges_type = ges_type[non_nan_indices]
+    # objects = objects[non_nan_indices]
     # Take care of bad values
     for i, spec in enumerate(spectra):
         spec[spec<0]=0
 
-    contam_uves_spectra = []
-    uncontam_uves_spectra = []
-    solar_frac = []
-    snr = []
-    teff = []
-    logg = []
-    feh = []
-    vrad = []
-    vmicro = []
-    ca = []
-    mg = []
-    o = []
-    s = []
-    ti = []
     print(f'Collecting spectra for the {args.dset_type} set...')
     for i in range(args.total_num):
 
-        if i % 100 == 0:
-            print(f'{i} of {args.total_num} collected')
+        if i % (BATCH_SIZE * 10) == 0:
+            print(f'{i} of {args.total_num} processed')
 
         # Collect a UVES and solar spectrum
         if args.dset_type == 'train':
@@ -156,64 +149,69 @@ def make_dataset(args):
         rv = np.random.uniform(-50, 50)
         shifted_rv, shifted_flux = add_radial_velocity(wave_grid_solar, rv, uves_spectrum)
 
-        # Contaminate the spectrum and append data to lists
+        # Contaminate the spectrum
         contam_spectrum = shifted_flux + final_factor * solar_spectrum
-        contam_uves_spectra.append(contam_spectrum)
-        uncontam_uves_spectra.append(shifted_flux)
-        solar_frac.append(frac_solar_contribution)
-        snr.append(snr_uves[uves_spec_ind])
-        teff.append(y_uves[:, 0][uves_spec_ind])
-        logg.append(y_uves[:, 1][uves_spec_ind])
-        feh.append(y_uves[:, 2][uves_spec_ind])
-        vrad.append(rv)
-        vmicro.append(y_uves[:, 4][uves_spec_ind])
-        ca.append(abundances_uves[:, 0][uves_spec_ind])
-        mg.append(abundances_uves[:, 1][uves_spec_ind])
-        o.append(abundances_uves[:, 2][uves_spec_ind])
-        s.append(abundances_uves[:, 3][uves_spec_ind])
-        ti.append(abundances_uves[:, 4][uves_spec_ind])
 
-    contam_weavescale = []
-    uncontam_weavescale = []
-    BATCH_SIZE = 16
-    print('Processing spectra to have WEAVE resolution and sampling')
-    # Now degrade resolution and rebin to WEAVE-HR
-    for i in range(len(contam_uves_spectra))[::BATCH_SIZE]:
-        print(i)
+        # Append data to dict
+        DATA_DICT['frac_solar'].append(frac_solar_contribution)
+        DATA_DICT['snr'].append(snr_uves[uves_spec_ind])
+        DATA_DICT['Ca'].append(abundances_uves[:, 0][uves_spec_ind])
+        DATA_DICT['Mg'].append(abundances_uves[:, 1][uves_spec_ind])
+        DATA_DICT['O'].append(abundances_uves[:, 2][uves_spec_ind])
+        DATA_DICT['S'].append(abundances_uves[:, 3][uves_spec_ind])
+        DATA_DICT['Ti'].append(abundances_uves[:, 4][uves_spec_ind])
+        DATA_DICT['vrad'].append(rv)
+        DATA_DICT['teff'].append(y_uves[:, 0][uves_spec_ind])
+        DATA_DICT['logg'].append(y_uves[:, 1][uves_spec_ind])
+        DATA_DICT['feh'].append(y_uves[:, 2][uves_spec_ind])
+        DATA_DICT['vmicro'].append(y_uves[:, 4][uves_spec_ind])
+        DATA_DICT['spectra'].append(shifted_flux)
+        DATA_DICT['spectra+solar'].append(contam_spectrum)
 
-        contam_batch = contam_uves_spectra[i:i + BATCH_SIZE]
-        uncontam_batch = uncontam_uves_spectra[i:i + BATCH_SIZE]
+        # Fill up h5 file
+        if (i % BATCH_SIZE == 0 and i != 0) or i == args.total_num - 1:
 
-        contam_batch = augment_spectra_parallel(contam_batch, wave_grid_solar, shortened_wave_grid,
-                                                wave_grid_weave_overlap, 20000)
-        uncontam_batch = augment_spectra_parallel(uncontam_batch, wave_grid_solar, shortened_wave_grid,
-                                                  wave_grid_weave_overlap, 20000)
+            print(f'Augmenting {len(DATA_DICT["teff"])} spectra')
+            # Change resolution and wavelength grid
+            DATA_DICT['spectra+solar'] = augment_spectra_parallel(DATA_DICT['spectra+solar'], wave_grid_solar,
+                                                                  shortened_wave_grid,
+                                                                  wave_grid_weave_overlap, 20000)
+            DATA_DICT['spectra'] = augment_spectra_parallel(DATA_DICT['spectra'], wave_grid_solar,
+                                                            shortened_wave_grid,
+                                                            wave_grid_weave_overlap, 20000)
 
-        contam_weavescale.extend(contam_batch)
-        uncontam_weavescale.extend(uncontam_batch)
+            # Create master file and add data
+            if not os.path.exists(args.save_path):
+                print('Save file does not yet exist. Creating it at: {}'.format(args.save_path))
+                with h5py.File(args.save_path, 'w') as hf:
+                    for key in DATA_DICT.keys():
+                        print(key)
+                        if len(np.shape(DATA_DICT[key])) == 3:  # e.g. image
+                            maxshape = (None, np.shape(DATA_DICT[key])[1], np.shape(DATA_DICT[key])[2])
+                        elif len(np.shape(DATA_DICT[key])) == 2:  # e.g. 1-d spectrum
+                            maxshape = (None, np.shape(DATA_DICT[key])[1])
+                        else:  # e.g. single value
+                            maxshape = (None,)
+                        hf.create_dataset(key, data=DATA_DICT[key], maxshape=maxshape)
+            # Or append to master file if it already exists
+            else:
+                print('Appending data to file...')
+                with h5py.File(args.save_path, 'a') as hf:
+                    for key in DATA_DICT.keys():
+                        hf[key].resize((hf[key].shape[0]) + np.shape(DATA_DICT[key])[0],
+                                       axis=0)
+                        hf[key][-np.shape(DATA_DICT[key])[0]:] = DATA_DICT[key]
 
-    mean = np.mean(contam_weavescale)
-    std = np.std(uncontam_weavescale)
+            # Clear data dict to get it ready for next batch of data
+            for value in DATA_DICT.values():
+                del value[:]
 
-    save_path = os.path.join(args.save_path)
-    with h5py.File(save_path, "w") as f:
-        spectra_dset = f.create_dataset('spectra', data=np.asarray(uncontam_weavescale))
-        spectra_contam_dset = f.create_dataset('spectra+solar', data=np.asarray(contam_weavescale))
-        solar_frac_dset = f.create_dataset('frac_solar', data=np.asarray(solar_frac))
-        snr_dset = f.create_dataset('snr', data=np.asarray(snr))
-        mean_dset = f.create_dataset('mean_flux', data=mean)
-        std_dset = f.create_dataset('std_flux', data=std)
-        teff_dset = f.create_dataset('teff', data=np.asarray(teff))
-        logg_dset = f.create_dataset('logg', data=np.asarray(logg))
-        feh_dset = f.create_dataset('feh', data=np.asarray(feh))
-        vrad_dset = f.create_dataset('vrad', data=np.asarray(vrad))
-        vmicro_dset = f.create_dataset('vmicro', data=np.asarray(vmicro))
-        ca_dset = f.create_dataset('Ca', data=np.asarray(ca))
-        mg_dset = f.create_dataset('Mg', data=np.asarray(mg))
-        o_dset = f.create_dataset('O', data=np.asarray(o))
-        s_dset = f.create_dataset('S', data=np.asarray(s))
-        ti_dset = f.create_dataset('Ti', data=np.asarray(ti))
-        wave_dset = f.create_dataset('wave_grid', data=wave_grid_weave_overlap)
+    # Calculate mean and std of flux data and append to h5 file
+    with h5py.File(args.save_path, 'a') as hf:
+        mean_flux = np.mean(hf['spectra+solar'])
+        std_flux = np.std(hf['spectra+solar'])
+        hf.create_dataset('mean_flux', data=mean_flux)
+        hf.create_dataset('std_flux', data=std_flux)
 
 
 if __name__ == "__main__":
