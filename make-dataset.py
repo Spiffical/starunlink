@@ -113,12 +113,18 @@ def make_dataset(args):
     # objects = objects[non_nan_indices]
     # Take care of bad values
     for i, spec in enumerate(spectra):
-        spec[spec<0]=0
+        spec[spec < 0] = 0
+
+    if os.path.exists(args.save_path):
+        with h5py.File(args.save_path, 'w') as hf:
+            num_processed_already = len(hf['teff'])
+    else:
+        num_processed_already = 0
 
     print(f'Collecting spectra for the {args.dset_type} set...')
-    for i in range(args.total_num):
+    for i in range(num_processed_already, args.total_num):
 
-        if i % (BATCH_SIZE * 10) == 0:
+        if i % BATCH_SIZE == 0:
             print(f'{i} of {args.total_num} processed')
 
         # Collect a UVES and solar spectrum
@@ -141,7 +147,7 @@ def make_dataset(args):
         median_solar_flux = np.median(solar_spectrum)
 
         # Determine how much solar contamination there should be
-        norm_factor = median_uves_flux / median_solar_flux
+        norm_factor = median_uves_flux / median_solar_flux  # For bringing solar flux to same scale as uves flux
         frac_solar_contribution = np.random.uniform(0.00, 0.5)
         final_factor = norm_factor * frac_solar_contribution
 
