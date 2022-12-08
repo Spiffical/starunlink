@@ -218,6 +218,7 @@ def make_dataset(args):
         std_flux = np.std(hf['spectra+solar'])
         hf.create_dataset('mean_flux', data=mean_flux)
         hf.create_dataset('std_flux', data=std_flux)
+        hf.create_dataset('wave_grid', data=wave_grid_weave_overlap)
 
 
 if __name__ == "__main__":
