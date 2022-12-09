@@ -101,6 +101,7 @@ def make_dataset(args):
         y_uves = np.column_stack([f['teff'][:], f['logg'][:], f['fe_h'][:], f['v_rad'][:], f['vmicro'][:]])
         abundances_uves = np.column_stack([f['Ca'][:], f['Mg'][:], f['O'][:], f['S'][:], f['Ti'][:]])
         snr_uves = f['SNR'][:]
+        rv_uves = f['v_rad'][:]
         # ges_type = f['ges_type'][:]
         # objects = f['object'][:]
         # wave_grid = f['wave_grid'][:]
@@ -109,6 +110,7 @@ def make_dataset(args):
     y_uves = y_uves[non_nan_indices]
     abundances_uves = abundances_uves[non_nan_indices]
     snr_uves = snr_uves[non_nan_indices]
+    rv_uves = rv_uves[non_nan_indices]
     # ges_type = ges_type[non_nan_indices]
     # objects = objects[non_nan_indices]
     # Take care of bad values
@@ -152,7 +154,10 @@ def make_dataset(args):
         final_factor = norm_factor * frac_solar_contribution
 
         # Radially shift the spectrum
-        rv = np.random.uniform(-50, 50)
+        if args.dset_type == 'test' and ~np.isnan(rv_uves[uves_spec_ind]):
+            rv = rv_uves[uves_spec_ind]
+        else:
+            rv = np.random.uniform(-50, 50)
         shifted_rv, shifted_flux = add_radial_velocity(wave_grid_solar, rv, uves_spectrum)
 
         # Contaminate the spectrum

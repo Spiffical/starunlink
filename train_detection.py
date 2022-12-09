@@ -37,13 +37,21 @@ def train_NN(num_train, data_path, save_folder, max_epochs, batch_size, lastlaye
     out_channels = 3 if lastlayer == 'labels' else 1
     NN = StarLink(1, out_channels, (1, len_spec))
 
-    # Load in previous best model weights if they were saved
-    bestmodel_path = os.path.join(save_folder, 'model_best.pth')
-    loss_val_min = 9999
-    if os.path.exists(bestmodel_path):
-        sys.stdout.write('Model aleady exists! Continuing from saved file: {}\n'.format(bestmodel_path))
-        NN.load_state_dict(torch.load(bestmodel_path))
-        loss_hist = np.loadtxt(os.path.join(save_folder, 'train_hist.txt'), dtype=float, delimiter=',')
+    # Load in last checkpointed model
+    bestmodel_checkpoint = os.path.join(args.save_folder, 'checkpoint.pth')
+    loss_val_min = np.inf
+    if os.path.exists(bestmodel_checkpoint):
+        sys.stdout.write('Model aleady exists! Continuing from saved file: {}\n'.format(bestmodel_checkpoint))
+
+        print('Loading checkpointed model state_dict')
+        state = torch.load(bestmodel_checkpoint)
+        NN.load_state_dict(state['state_dict'])
+
+        print('Loading checkpointed optimizer state')
+        optimizer = torch.optim.Adam(NN.parameters())
+        optimizer.load_state_dict(state['optimizer'])
+
+        loss_hist = np.loadtxt(os.path.join(args.save_folder, 'train_hist.txt'), dtype=float, delimiter=',')
         dim = len(np.shape(loss_hist))
         if dim == 0:
             sys.stdout.write('No training history!\n')
@@ -52,9 +60,10 @@ def train_NN(num_train, data_path, save_folder, max_epochs, batch_size, lastlaye
         else:
             loss_val_hist = loss_hist[:, 1]
             loss_val_min = min(loss_val_hist)
+    else:
+        optimizer = torch.optim.Adam(NN.parameters(), lr=learning_rate)
 
-    # Setting up optimizer and learning rates
-    optimizer = optim.Adam(NN.parameters(), lr=learning_rate)
+    # Set up scheduler
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer,
                                                      mode='min',
                                                      factor=0.5,
@@ -63,7 +72,7 @@ def train_NN(num_train, data_path, save_folder, max_epochs, batch_size, lastlaye
                                                      eps=1e-08,
                                                      verbose=True)
 
-    NN.cuda()
+    NN.to(device)
 
     for epoch in range(max_epochs):
         sys.stdout.write('Epoch {}\n'.format(epoch))
@@ -91,7 +100,16 @@ def train_NN(num_train, data_path, save_folder, max_epochs, batch_size, lastlaye
         if loss_val < loss_val_min:
             loss_val_min = loss_val
             sys.stdout.write('Saving best model with validation loss of {}\n'.format(loss_val))
-            torch.save(NN.state_dict(), bestmodel_path)
+            torch.save(NN.state_dict(), os.path.join(save_folder, 'model_best.pth'))
+
+        # Save checkpoint for resuming training
+        print('Saving the checkpoint')
+        state = {
+            'epoch': epoch,
+            'state_dict': NN.state_dict(),
+            'optimizer': optimizer.state_dict()
+        }
+        torch.save(state, os.path.join(save_folder, 'checkpoint.pth'))
 
 
 ################################################################################
