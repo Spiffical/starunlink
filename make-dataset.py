@@ -1,18 +1,21 @@
 import os
 import sys
 import h5py
+import glob
 import numpy as np
 import multiprocessing
 import argparse
+import uuid
 from contextlib import contextmanager
 sys.path.insert(0, "{}/StarNet".format(os.getenv('HOME')))
 from starnet.utils.data_utils.preprocess_spectra import rebin
 from eniric.broaden import convolution, resolution_convolution
+from starnet.detection.utils import str2bool
 
 
 home = os.getenv('HOME')
-data_dir = os.path.join(home, 'data')
-spec_dir = os.path.join(data_dir, 'spectra')
+#data_dir = os.path.join(home, 'data')
+#spec_dir = os.path.join(data_dir, 'spectra', 'processed')
 
 BATCH_SIZE = 16
 DATA_DICT = {"spectra": [], "spectra+solar": [], "frac_solar": [], "snr": [], "O": [],
@@ -117,17 +120,31 @@ def make_dataset(args):
     for i, spec in enumerate(spectra):
         spec[spec < 0] = 0
 
-    if os.path.exists(args.save_path):
-        with h5py.File(args.save_path, 'w') as hf:
-            num_processed_already = len(hf['teff'])
-    else:
-        num_processed_already = 0
+    #if os.path.exists(args.save_path):
+    #    with h5py.File(args.save_path, 'w') as hf:
+    #        num_processed_already = len(hf['teff'])
+    #else:
+    #    num_processed_already = 0
+
+    # Determine total number of spectra already in chosen directory
+    existing_files = glob.glob(args.save_dir + '/*__*')
+    # Number of spectra appended on to end of filename
+    total_num_spec = np.sum([int(os.path.basename(f)[18:]) for f in existing_files])
+    print('Total # of spectra in directory: {}/{}'.format(total_num_spec, args.total_num))
+    print('Number of spectra already processed: {}/{}'.format(total_num_spec, args.total_num))
 
     print(f'Collecting spectra for the {args.dset_type} set...')
-    for i in range(num_processed_already, args.total_num):
 
-        if i % BATCH_SIZE == 0:
-            print(f'{i} of {args.total_num} processed')
+    # Generate the batches of spectra
+    spectra_created = 0
+    while total_num_spec <= args.total_num:
+    #for i in range(num_processed_already, args.total_num):
+
+        if total_num_spec >= args.total_num:
+            print('Maximum number of spectra reached.')
+            break
+        #if i % BATCH_SIZE == 0:
+        #    print(f'{i} of {args.total_num} processed')
 
         # Collect a UVES and solar spectrum
         if args.dset_type == 'train':
@@ -150,18 +167,21 @@ def make_dataset(args):
 
         # Determine how much solar contamination there should be
         norm_factor = median_uves_flux / median_solar_flux  # For bringing solar flux to same scale as uves flux
-        frac_solar_contribution = np.random.uniform(0.00, 0.5)
+        frac_solar_contribution = np.random.uniform(0.00, args.max_contam)
         final_factor = norm_factor * frac_solar_contribution
 
-        # Radially shift the spectrum
-        if args.dset_type == 'test' and ~np.isnan(rv_uves[uves_spec_ind]):
+        if str2bool(args.real_vrad):
             rv = rv_uves[uves_spec_ind]
-        else:
-            rv = np.random.uniform(-50, 50)
-        shifted_rv, shifted_flux = add_radial_velocity(wave_grid_solar, rv, uves_spectrum)
+        else:  # Radially shift the spectrum
+            if ~np.isnan(rv_uves[uves_spec_ind]):
+                rv = np.random.uniform(-200, 200)
+                rv_interm = rv_uves[uves_spec_ind] - rv  # first shift to rest frame then bring to new rv
+                _, uves_spectrum = add_radial_velocity(wave_grid_solar, rv_interm, uves_spectrum)
+            else:
+                rv = rv_uves[uves_spec_ind]
 
         # Contaminate the spectrum
-        contam_spectrum = shifted_flux + final_factor * solar_spectrum
+        contam_spectrum = uves_spectrum + final_factor * solar_spectrum
 
         # Append data to dict
         DATA_DICT['frac_solar'].append(frac_solar_contribution)
@@ -176,72 +196,100 @@ def make_dataset(args):
         DATA_DICT['logg'].append(y_uves[:, 1][uves_spec_ind])
         DATA_DICT['feh'].append(y_uves[:, 2][uves_spec_ind])
         DATA_DICT['vmicro'].append(y_uves[:, 4][uves_spec_ind])
-        DATA_DICT['spectra'].append(shifted_flux)
+        DATA_DICT['spectra'].append(uves_spectrum)
         DATA_DICT['spectra+solar'].append(contam_spectrum)
 
         # Fill up h5 file
-        if (i % BATCH_SIZE == 0 and i != 0) or i == args.total_num - 1:
+        if len(DATA_DICT['teff']) == BATCH_SIZE:
+        #if (i % BATCH_SIZE == 0 and i != 0) or i == args.total_num - 1:
 
             print(f'Augmenting {len(DATA_DICT["teff"])} spectra')
             # Change resolution and wavelength grid
             DATA_DICT['spectra+solar'] = augment_spectra_parallel(DATA_DICT['spectra+solar'], wave_grid_solar,
                                                                   shortened_wave_grid,
-                                                                  wave_grid_weave_overlap, 20000)
+                                                                  wave_grid_weave_overlap, args.resolution)
             DATA_DICT['spectra'] = augment_spectra_parallel(DATA_DICT['spectra'], wave_grid_solar,
                                                             shortened_wave_grid,
-                                                            wave_grid_weave_overlap, 20000)
+                                                            wave_grid_weave_overlap, args.resolution)
 
-            # Create master file and add data
-            if not os.path.exists(args.save_path):
-                print('Save file does not yet exist. Creating it at: {}'.format(args.save_path))
-                with h5py.File(args.save_path, 'w') as hf:
-                    for key in DATA_DICT.keys():
-                        print(key)
-                        if len(np.shape(DATA_DICT[key])) == 3:  # e.g. image
-                            maxshape = (None, np.shape(DATA_DICT[key])[1], np.shape(DATA_DICT[key])[2])
-                        elif len(np.shape(DATA_DICT[key])) == 2:  # e.g. 1-d spectrum
-                            maxshape = (None, np.shape(DATA_DICT[key])[1])
-                        else:  # e.g. single value
-                            maxshape = (None,)
-                        hf.create_dataset(key, data=DATA_DICT[key], maxshape=maxshape)
-            # Or append to master file if it already exists
-            else:
-                print('Appending data to file...')
-                with h5py.File(args.save_path, 'a') as hf:
-                    for key in DATA_DICT.keys():
-                        hf[key].resize((hf[key].shape[0]) + np.shape(DATA_DICT[key])[0],
-                                       axis=0)
-                        hf[key][-np.shape(DATA_DICT[key])[0]:] = DATA_DICT[key]
+            if not os.path.exists(args.save_dir):
+                os.makedirs(args.save_dir)
+            unique_filename = str(uuid.uuid4())[:12] + '__spec{}'.format(BATCH_SIZE)
+            save_path = os.path.join(args.save_dir, unique_filename)
+            print('Saving {} to {}'.format(unique_filename, args.save_dir))
+
+            with h5py.File(save_path, 'w') as hf:
+                for key in DATA_DICT.keys():
+                    print(key)
+                    hf.create_dataset(key, data=np.asarray(DATA_DICT[key]))
+                hf.create_dataset('wave_grid', data=wave_grid_weave_overlap)
+
+            spectra_created += BATCH_SIZE
+            print('Total # of spectra created so far: {}'.format(spectra_created))
+
+            # Again, check to see how many files are in the chosen save directory (parallel jobs will be filling it up too)
+            existing_files = glob.glob(args.save_dir + '/*__*')
+            # Number of spectra appended on to end of filename
+            total_num_spec = np.sum([int(os.path.basename(f)[18:]) for f in existing_files])
+            print('Total # of spectra in directory: {}/{}'.format(total_num_spec, args.total_num))
+
+            # # Create master file and add data
+            # if not os.path.exists(args.save_path):
+            #     print('Save file does not yet exist. Creating it at: {}'.format(args.save_path))
+            #     with h5py.File(args.save_path, 'w') as hf:
+            #         for key in DATA_DICT.keys():
+            #             print(key)
+            #             if len(np.shape(DATA_DICT[key])) == 3:  # e.g. image
+            #                 maxshape = (None, np.shape(DATA_DICT[key])[1], np.shape(DATA_DICT[key])[2])
+            #             elif len(np.shape(DATA_DICT[key])) == 2:  # e.g. 1-d spectrum
+            #                 maxshape = (None, np.shape(DATA_DICT[key])[1])
+            #             else:  # e.g. single value
+            #                 maxshape = (None,)
+            #             hf.create_dataset(key, data=DATA_DICT[key], maxshape=maxshape)
+            # # Or append to master file if it already exists
+            # else:
+            #     print('Appending data to file...')
+            #     with h5py.File(args.save_path, 'a') as hf:
+            #         for key in DATA_DICT.keys():
+            #             hf[key].resize((hf[key].shape[0]) + np.shape(DATA_DICT[key])[0],
+            #                            axis=0)
+            #             hf[key][-np.shape(DATA_DICT[key])[0]:] = DATA_DICT[key]
 
             # Clear data dict to get it ready for next batch of data
             for value in DATA_DICT.values():
                 del value[:]
 
     # Calculate mean and std of flux data and append to h5 file
-    with h5py.File(args.save_path, 'a') as hf:
-        mean_flux = np.mean(hf['spectra+solar'])
-        std_flux = np.std(hf['spectra+solar'])
-        hf.create_dataset('mean_flux', data=mean_flux)
-        hf.create_dataset('std_flux', data=std_flux)
-        hf.create_dataset('wave_grid', data=wave_grid_weave_overlap)
+    #with h5py.File(args.save_path, 'a') as hf:
+    #    mean_flux = np.mean(hf['spectra+solar'])
+    #    std_flux = np.std(hf['spectra+solar'])
+    #    hf.create_dataset('mean_flux', data=mean_flux)
+    #    hf.create_dataset('std_flux', data=std_flux)
+    #    hf.create_dataset('wave_grid', data=wave_grid_weave_overlap)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--save_path', type=str, required=True,
-                        help='Folder to save trained model in (if None, folder name created based on date)')
+    parser.add_argument('--save_dir', type=str, required=True,
+                        help='Folder to save spectra .h5 files in')
     parser.add_argument('--total_num', type=int, required=True,
-                        help='Size of training set')
+                        help='Maximum number of spectra to create')
     parser.add_argument('--wave_grid_solar', type=str, default='/arc/home/Merileo/data/wave_grids/UVES_4835-5395_solar.npy',
                         help='Number of spectra used in a single batch')
     parser.add_argument('--wave_grid_weave', type=str, default='/arc/home/Merileo/data/wave_grids/weave_hr_wavegrid_arms.npy',
                         help='Number of spectra used in a single batch')
-    parser.add_argument('--solar_spectra', type=str, default=os.path.join(spec_dir, 'UVES_solar_spectra.npy'),
+    parser.add_argument('--solar_spectra', type=str, default='UVES_solar_spectra.npy',
                         help='Number of spectra used in a single batch')
-    parser.add_argument('--uves_spectra', type=str, default=os.path.join(spec_dir, 'UVES_GE_MW_4835-5395_nonorm_abundances.h5'),
+    parser.add_argument('--uves_spectra', type=str, default='UVES_GE_MW_4835-5395_nonorm_abundances.h5',
                         help='Number of spectra used in a single batch')
     parser.add_argument('--dset_type', type=str, default='train',
                         help='Number of spectra used in a single batch')
+    parser.add_argument('--max_contam', type=float, default=0.5,
+                        help='maximum fraction of contamination to add')
+    parser.add_argument('--resolution', type=float, default=20000,
+                        help='Resolution to degrade spectrum to')
+    parser.add_argument('--real_vrad', type=str, default='False',
+                        help='Whether to use real vrads (if false, will uniformly sample within bounds')
     args = parser.parse_args()
 
     make_dataset(args)

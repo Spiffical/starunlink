@@ -151,9 +151,9 @@ def train_epoch_generator(NN, training_generator, optimizer, device, train_steps
     NN.train()
     loss = 0
     if lastlayer == 'sigmoid':
-        loss_fn = nn.BCEWithLogitsLoss()
+        loss_fn = nn.BCEWithLogitsLoss().to(device)
     else:
-        loss_fn = nn.MSELoss()
+        loss_fn = nn.MSELoss().to(device)
 
     # Passing the data through the NN
     for i, (binary_contam, spectra, frac_solar, labels) in enumerate(training_generator):
