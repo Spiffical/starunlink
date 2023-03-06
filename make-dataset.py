@@ -10,7 +10,6 @@ from contextlib import contextmanager
 sys.path.insert(0, "{}/StarNet".format(os.getenv('HOME')))
 from starnet.utils.data_utils.preprocess_spectra import rebin
 from eniric.broaden import convolution, resolution_convolution
-from starnet.detection.utils import str2bool
 
 
 home = os.getenv('HOME')
@@ -21,6 +20,17 @@ BATCH_SIZE = 16
 DATA_DICT = {"spectra": [], "spectra+solar": [], "frac_solar": [], "snr": [], "O": [],
              "Mg": [], "Ca": [], "S": [], "Ti": [], "vmicro": [], "vrad": [], "feh": [],
              "teff": [], "logg": []}
+
+
+def str2bool(v):
+    if isinstance(v, bool):
+       return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1', 'real'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0', 'fake'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
 def add_radial_velocity(wav, rv, flux=None):

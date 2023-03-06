@@ -73,6 +73,38 @@ def train_NN(args):
     else:
         raise ValueError('Unrecognized model type: {}'.format(args.model_type))
 
+    # Check if the GPU is available
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    print(f'Selected device: {device}')
+
+    # Move the autoencoder to the selected device
+    starencoder.to(device)
+
+    # Load in checkpointed model weights if they were saved
+    model_checkpoint_path = os.path.join(args.save_folder, 'checkpoint.pth')
+    best_valid_loss = np.inf
+    if os.path.exists(model_checkpoint_path):
+        sys.stdout.write('Model aleady exists! Continuing from saved file: {}\n'.format(model_checkpoint_path))
+        print('Loading checkpointed model state_dict')
+        state = torch.load(model_checkpoint_path)
+        starencoder.load_state_dict(state['state_dict'])
+
+        print('Loading checkpointed optimizer state')
+        optimizer = torch.optim.Adam(starencoder.parameters())
+        optimizer.load_state_dict(state['optimizer'])
+
+        loss_hist = np.loadtxt(os.path.join(args.save_folder, 'train_hist.txt'), dtype=float, delimiter=',')
+        dim = len(np.shape(loss_hist))
+        if dim == 0:
+            sys.stdout.write('No training history!\n')
+        elif dim == 1:
+            best_valid_loss = loss_hist[1]
+        else:
+            loss_val_hist = loss_hist[:, 1]
+            best_valid_loss = min(loss_val_hist)
+    else:
+        optimizer = torch.optim.Adam(starencoder.parameters(), lr=args.learning_rate)
+
     ### Define data loaders
     train_loader, valid_loader, = get_train_valid_loader(args.data_path,
                                                          args.batch_size,
@@ -86,9 +118,8 @@ def train_NN(args):
                                                          indices_valid=indices_valid,
                                                          truncate_n=len_spec-computed_input)
 
-    ### Define optimizer and scheduler
-    optim = torch.optim.Adam(starencoder.parameters(), lr=args.learning_rate)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optim,
+    ### Define scheduler
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,
                                                            mode='min',
                                                            factor=0.5,
                                                            patience=5,
@@ -96,18 +127,10 @@ def train_NN(args):
                                                            eps=1e-08,
                                                            verbose=True)
 
-
-    # Check if the GPU is available
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    print(f'Selected device: {device}')
-
-    # Move the autoencoder to the selected device
-    starencoder.to(device)
-
     # Training cycle
     num_epochs = args.epochs
     history_da = {'train_loss': [], 'val_loss': []}
-    best_valid_loss = float('inf')
+    #best_valid_loss = float('inf')
 
     for epoch in range(num_epochs):
         print('EPOCH %d/%d' % (epoch + 1, num_epochs))
@@ -118,7 +141,7 @@ def train_NN(args):
             device=device,
             dataloader=train_loader,
             loss_fn=loss_fn,
-            optimizer=optim,
+            optimizer=optimizer,
             model_type=args.model_type)
 
         # Validation
@@ -140,6 +163,15 @@ def train_NN(args):
             sys.stdout.write('Saving best model with validation loss of {}\n'.format(val_loss))
             best_valid_loss = val_loss
             torch.save(starencoder.state_dict(), os.path.join(args.save_folder, 'best_starencoder.pth'))
+
+        # Save checkpoint for resuming training
+        print('Saving the checkpoint')
+        state = {
+            'epoch': epoch,
+            'state_dict': starencoder.state_dict(),
+            'optimizer': starencoder.state_dict()
+        }
+        torch.save(state, os.path.join(args.save_folder, 'checkpoint.pth'))
 
         # Print Validation loss
         history_da['train_loss'].append(train_loss)

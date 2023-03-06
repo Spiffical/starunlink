@@ -59,6 +59,7 @@ def write_script(output_path, save_folder, data_path, train_script, virtual_env,
         writer.write('#!/bin/bash\n')
         writer.write('module load python/3.7\n')
         writer.write('source {}\n'.format(os.path.join(virtual_env, 'bin/activate')))
+        writer.write('module load python/3.7\n')
 
         writer.write('cp -r {} {}\n'.format(os.path.join(HOME_DIR, 'StarNet'), '$SLURM_TMPDIR'))
         writer.write('export PYTHONPATH="{}:{}"\n'.format(PYTHONPATH, os.path.join('$SLURM_TMPDIR', 'StarNet/')))
