@@ -11,10 +11,43 @@ from detection.model import DetectStarLink
 
 
 def train_NN(num_train, data_path, save_folder, max_epochs, batch_size, lastlayer, validation_path, learning_rate):
+    """
+        Train a neural network for detecting satellite contamination in stellar spectra.
+
+        This function sets up the training and validation data loaders, initializes the neural network model,
+        and trains the model for a specified number of epochs. The best model and checkpoints are saved during training.
+
+        Parameters
+        ----------
+        num_train : int
+            Total number of training samples.
+        data_path : str
+            Path to the training dataset.
+        save_folder : str
+            Directory where trained models and checkpoints will be saved.
+        max_epochs : int
+            Maximum number of training epochs.
+        batch_size : int
+            Number of samples per batch.
+        lastlayer : str
+            Specifies the type of the last layer in the neural network.
+            Accepts values: 'sigmoid', 'linear', or 'labels'.
+        validation_path : str
+            Path to the validation dataset.
+        learning_rate : float
+            Initial learning rate for the optimizer.
+
+        Notes
+        -----
+        The function assumes the presence of a GPU for training. If not available, it defaults to CPU.
+        The best model (with minimum validation loss) and checkpoints are saved in the specified save_folder.
+        """
+
+    # Create save folder if it doesn't exist
     if not os.path.exists(save_folder):
         os.makedirs(save_folder)
-        # np.save(os.path.join(save_folder, 'config.npy'), np.asarray(config))
 
+    # Set up training and validation data loaders
     train_loader, valid_loader = get_train_valid_loader(data_path,
                                                         batch_size,
                                                         num_train,
@@ -24,17 +57,19 @@ def train_NN(num_train, data_path, save_folder, max_epochs, batch_size, lastlaye
                                                         pin_memory=True,
                                                         val_path=validation_path)
 
-    # CUDA for PyTorch
+    # Check for CUDA availability
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda:0" if use_cuda else "cpu")
 
+    # Determine the length of the spectra from the data
     with h5py.File(data_path, 'r') as f:
         len_spec = len(f['spectra'][0])
 
+    # Initialize the neural network model
     out_channels = 3 if lastlayer == 'labels' else 1
     NN = DetectStarLink(1, out_channels, (1, len_spec))
 
-    # Load in last checkpointed model
+    # Load the last checkpointed model if it exists
     bestmodel_checkpoint = os.path.join(args.save_folder, 'checkpoint.pth')
     loss_val_min = np.inf
     if os.path.exists(bestmodel_checkpoint):
@@ -69,8 +104,10 @@ def train_NN(num_train, data_path, save_folder, max_epochs, batch_size, lastlaye
                                                      eps=1e-08,
                                                      verbose=True)
 
+    # Move the model to the appropriate device
     NN.to(device)
 
+    # Training loop
     for epoch in range(max_epochs):
         sys.stdout.write('Epoch {}\n'.format(epoch))
         # Training epoch
@@ -82,8 +119,7 @@ def train_NN(num_train, data_path, save_folder, max_epochs, batch_size, lastlaye
                                        device=device,
                                        lastlayer=lastlayer)
         scheduler.step(loss_val)
-        # loss_train = train_epoch(NN,data_file,indices_train,targets,mean,std,batch_size,scheduler,optimizer)
-        # loss_val = val_epoch(NN,data_file,indices_val,targets,mean,std,batch_size)
+
         sys.stdout.write('train_loss: {}, val_loss: {}\n'.format(loss_train, loss_val))
         # Saving results to txt file
         sys.stdout.write('Saving training losses to {}\n'.format(os.path.join(save_folder, 'train_hist.txt')))
