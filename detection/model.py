@@ -6,10 +6,31 @@ import functools
 import operator
 
 
-class StarLink(Module):
+class DetectStarLink(Module):
+    """
+    DetectStarLink is a neural network module designed for detecting satellite contamination in stellar spectra.
+
+    The architecture consists of a series of 1D convolutional layers for feature extraction,
+    followed by fully connected layers for prediction.
+
+    Attributes:
+        feature_extractor (nn.Sequential): Convolutional layers for feature extraction.
+        fc1 (nn.Sequential): First fully connected layer.
+        fc2 (nn.Sequential): Second fully connected layer.
+        output (nn.Sequential): Output layer for predictions.
+    """
+
     def __init__(self, in_channels=1, out_channels=1, input_dim=(1, 43480)):
+        """
+        Initializes the StarLink module.
+
+        Args:
+            in_channels (int, optional): Number of input channels. Defaults to 1.
+            out_channels (int, optional): Number of output channels. Defaults to 1.
+            input_dim (tuple, optional): Dimensions of the input data. Defaults to (1, 43480).
+        """
         # call the parent constructor
-        super(StarLink, self).__init__()
+        super(DetectStarLink, self).__init__()
 
         self.feature_extractor = Sequential(
             # initialize first set of CONV => RELU => POOL layers
@@ -38,7 +59,15 @@ class StarLink(Module):
         )
 
     def forward(self, x):
+        """
+        Forward pass of the StarLink module.
 
+        Args:
+            x (torch.Tensor): Input tensor.
+
+        Returns:
+            torch.Tensor: Output predictions.
+        """
         out = self.feature_extractor(x)
         out = flatten(out, 1)
         out = self.fc1(out)

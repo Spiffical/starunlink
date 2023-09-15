@@ -7,7 +7,7 @@ import sys
 import argparse
 
 from detection.utils import get_train_valid_loader, train_epoch_generator, val_epoch_generator
-from detection.model import StarLink
+from detection.model import DetectStarLink
 
 
 def train_NN(num_train, data_path, save_folder, max_epochs, batch_size, lastlayer, validation_path, learning_rate):
@@ -35,7 +35,7 @@ def train_NN(num_train, data_path, save_folder, max_epochs, batch_size, lastlaye
         len_spec = len(f['spectra'][0])
 
     out_channels = 3 if lastlayer == 'labels' else 1
-    NN = StarLink(1, out_channels, (1, len_spec))
+    NN = DetectStarLink(1, out_channels, (1, len_spec))
 
     # Load in last checkpointed model
     bestmodel_checkpoint = os.path.join(args.save_folder, 'checkpoint.pth')
