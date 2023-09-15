@@ -24,9 +24,6 @@ def train_NN(num_train, data_path, save_folder, max_epochs, batch_size, lastlaye
                                                         pin_memory=True,
                                                         val_path=validation_path)
 
-    trainSteps = len(train_loader.dataset) // batch_size
-    valSteps = len(valid_loader.dataset) // batch_size
-
     # CUDA for PyTorch
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda:0" if use_cuda else "cpu")
@@ -80,11 +77,9 @@ def train_NN(num_train, data_path, save_folder, max_epochs, batch_size, lastlaye
         loss_train = train_epoch_generator(NN, training_generator=train_loader,
                                            optimizer=optimizer,
                                            device=device,
-                                           train_steps=trainSteps,
                                            lastlayer=lastlayer)
         loss_val = val_epoch_generator(NN, valid_generator=valid_loader,
                                        device=device,
-                                       val_steps=valSteps,
                                        lastlayer=lastlayer)
         scheduler.step(loss_val)
         # loss_train = train_epoch(NN,data_file,indices_train,targets,mean,std,batch_size,scheduler,optimizer)
@@ -136,24 +131,15 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    data_path = args.data_path
-    num_train = args.num_train
-    save_folder = args.save_folder
-    max_epochs = args.epochs
-    batch_size = args.batch_size
-    lastlayer = args.lastlayer
-    validation_path = args.validation_path
-    lr = args.learning_rate
-
     torch.multiprocessing.set_start_method('spawn')
 
-    train_NN(num_train,
-             data_path,
-             save_folder,
-             max_epochs,
-             batch_size,
-             lastlayer,
-             validation_path,
-             lr
+    train_NN(args.num_train,
+             args.data_path,
+             args.save_folder,
+             args.epochs,
+             args.batch_size,
+             args.lastlayer,
+             args.validation_path,
+             args.learning_rate
              )
 

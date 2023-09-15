@@ -7,8 +7,30 @@ import torch.nn as nn
 
 
 class HDF5Dataset(data.Dataset):
+    """
+    HDF5Dataset is a custom dataset class for loading and processing data from HDF5 files.
+
+    This class is designed to handle stellar spectra data, with support for normalization
+    of flux and stellar parameters (teff, logg, feh).
+    """
+
     def __init__(self, in_file, n_samples, mean_flux, std_flux, mean_teff, std_teff,
                  mean_logg, std_logg, mean_feh, std_feh):
+        """
+        Initializes the HDF5Dataset.
+
+        Args:
+            in_file (str): Path to the input HDF5 file.
+            n_samples (int): Number of samples in the dataset.
+            mean_flux (float): Mean value of flux for normalization.
+            std_flux (float): Standard deviation of flux for normalization.
+            mean_teff (float): Mean value of teff for normalization.
+            std_teff (float): Standard deviation of teff for normalization.
+            mean_logg (float): Mean value of logg for normalization.
+            std_logg (float): Standard deviation of logg for normalization.
+            mean_feh (float): Mean value of feh for normalization.
+            std_feh (float): Standard deviation of feh for normalization.
+        """
         super(HDF5Dataset, self).__init__()
 
         self.n_samples = n_samples
@@ -23,6 +45,19 @@ class HDF5Dataset(data.Dataset):
         self.std_feh = std_feh
 
     def __getitem__(self, index):
+        """
+        Retrieves a sample from the dataset at the specified index.
+
+        Args:
+            index (int): Index of the sample to retrieve.
+
+        Returns:
+            tuple: A tuple containing the following elements:
+                - ind (int): Index indicating the type of spectrum (0 for 'spectra', 1 for 'spectra+solar').
+                - spectrum (np.array): Normalized spectrum data.
+                - frac_solar (float): Fraction of solar contamination in the spectrum.
+                - labels (np.array): Normalized labels (teff, logg, feh).
+        """
         with h5py.File(self.in_file, 'r') as f:
             spectra_keys = ['spectra', 'spectra+solar']
             ind = np.random.randint(2)
@@ -48,6 +83,12 @@ class HDF5Dataset(data.Dataset):
         return ind, spectrum, frac_solar, labels
 
     def __len__(self):
+        """
+        Returns the total number of samples in the dataset.
+
+        Returns:
+            int: Total number of samples.
+        """
         return self.n_samples
 
 
@@ -61,23 +102,39 @@ def get_train_valid_loader(data_path,
                            val_path=''
                            ):
     """
-    Utility function for loading and returning train and valid
-    multi-process iterators. A sample
+    Utility function for loading and returning train and validation multi-process iterators.
     If using CUDA, num_workers should be set to 1 and pin_memory to True.
-    Params
-    ------
-    - data_path: path directory to the dataset.
-    - batch_size: how many samples per batch to load.
-    - valid_size: percentage split of the training set used for
-      the validation set. Should be a float in the range [0, 1].
-    - shuffle: whether to shuffle the train/validation indices.
-    - num_workers: number of subprocesses to use when loading the dataset.
-    - pin_memory: whether to copy tensors into CUDA pinned memory. Set it to
-      True if using GPU.
+
+    Parameters
+    ----------
+    data_path : str
+        Path to the dataset directory.
+    batch_size : int
+        Number of samples per batch to load.
+    num_train : int
+        Total number of training samples.
+    valid_size : float, optional
+        Percentage split of the training set used for the validation set.
+        Should be a float in the range [0, 1]. Defaults to 0.1.
+    shuffle : bool, optional
+        Whether to shuffle the train/validation indices. Defaults to True.
+    num_workers : int, optional
+        Number of subprocesses to use when loading the dataset. Defaults to 4.
+    pin_memory : bool, optional
+        Whether to copy tensors into CUDA pinned memory. Set it to True if using GPU. Defaults to True.
+    val_path : str, optional
+        Path to the validation dataset directory. If not provided, uses `data_path`. Defaults to ''.
+
     Returns
     -------
-    - train_loader: training set iterator.
-    - valid_loader: validation set iterator.
+    tuple
+        - train_loader (torch.utils.data.DataLoader): Training set iterator.
+        - valid_loader (torch.utils.data.DataLoader): Validation set iterator.
+
+    Raises
+    ------
+    AssertionError
+        If `valid_size` is not in the range [0, 1].
     """
     error_msg = "[!] valid_size should be in the range [0, 1]."
     assert ((valid_size >= 0) and (valid_size <= 1)), error_msg
@@ -146,8 +203,43 @@ def str2bool(v):
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
-# Function to execute a training epoch
-def train_epoch_generator(NN, training_generator, optimizer, device, train_steps, lastlayer):
+def train_epoch_generator(NN, training_generator, optimizer, device, lastlayer):
+    """
+    Executes a training epoch for a given neural network and data generator.
+
+    This function processes the data in batches, computes the loss, performs backpropagation,
+    and updates the model's weights.
+
+    Parameters
+    ----------
+    NN : torch.nn.Module
+        The neural network model to be trained.
+    training_generator : torch.utils.data.DataLoader
+        Data loader providing batches of training data.
+    optimizer : torch.optim.Optimizer
+        The optimizer used for updating the model's weights.
+    device : torch.device
+        The device (CPU or CUDA) where the model and data are loaded.
+    lastlayer : str
+        Specifies the type of the last layer in the neural network.
+        Accepts values: 'sigmoid', 'linear', or 'labels'.
+
+    Returns
+    -------
+    float
+        Average loss for the training epoch.
+
+    Raises
+    ------
+    ValueError
+        If `lastlayer` argument is not one of the recognized values.
+
+    Notes
+    -----
+    The function assumes that the data provided by `training_generator` consists of
+    binary contamination labels, spectra, fraction of solar contamination, and stellar labels.
+    Depending on the `lastlayer` argument, the appropriate target values are selected for training.
+    """
     NN.train()
     loss = 0
     if lastlayer == 'sigmoid':
@@ -155,9 +247,11 @@ def train_epoch_generator(NN, training_generator, optimizer, device, train_steps
     else:
         loss_fn = nn.MSELoss().to(device)
 
+    # Initialize a counter for the number of batches
+    batch_count = 0
+
     # Passing the data through the NN
     for i, (binary_contam, spectra, frac_solar, labels) in enumerate(training_generator):
-        # sys.stdout.write('{}\n'.format(i))
 
         x = spectra
         if lastlayer == 'sigmoid':
@@ -188,13 +282,49 @@ def train_epoch_generator(NN, training_generator, optimizer, device, train_steps
         # add batch loss to the total training loss
         loss += batch_loss
 
-    avgLoss = loss / train_steps
+        # Increment the batch counter
+        batch_count += 1
+
+    avgLoss = loss / batch_count
     avgLoss = avgLoss.detach().cpu().numpy()
     return avgLoss
 
 
-# Function to execute a validation epoch
-def val_epoch_generator(NN, valid_generator, device, val_steps, lastlayer):
+def val_epoch_generator(NN, valid_generator, device, lastlayer):
+    """
+    Executes a validation epoch for a given neural network and data generator.
+
+    This function processes the data in batches and computes the average loss
+    without performing any backpropagation or weight updates.
+
+    Parameters
+    ----------
+    NN : torch.nn.Module
+        The neural network model to be validated.
+    valid_generator : torch.utils.data.DataLoader
+        Data loader providing batches of validation data.
+    device : torch.device
+        The device (CPU or CUDA) where the model and data are loaded.
+    lastlayer : str
+        Specifies the type of the last layer in the neural network.
+        Accepts values: 'sigmoid', 'linear', or 'labels'.
+
+    Returns
+    -------
+    float
+        Average loss for the validation epoch.
+
+    Raises
+    ------
+    ValueError
+        If `lastlayer` argument is not one of the recognized values.
+
+    Notes
+    -----
+    The function assumes that the data provided by `valid_generator` consists of
+    binary contamination labels, spectra, fraction of solar contamination, and stellar labels.
+    Depending on the `lastlayer` argument, the appropriate target values are selected for validation.
+    """
     if lastlayer == 'sigmoid':
         loss_fn = nn.BCEWithLogitsLoss()
     else:
@@ -203,6 +333,8 @@ def val_epoch_generator(NN, valid_generator, device, val_steps, lastlayer):
     with torch.no_grad():
         NN.eval()
         loss = 0
+        # Initialize a counter for the number of batches
+        batch_count = 0
         # Passing the data through the NN
         for binary_contam, spectra, frac_solar, labels in valid_generator:
             x = spectra
@@ -224,7 +356,11 @@ def val_epoch_generator(NN, valid_generator, device, val_steps, lastlayer):
             y_pred = NN(x)
 
             loss += loss_fn(y_pred, y_true)  # *batch_size
-        avgLoss = loss / val_steps
+
+            # Increment the batch counter
+            batch_count += 1
+
+        avgLoss = loss / batch_count
         avgLoss = avgLoss.detach().cpu().numpy()
 
         return avgLoss
